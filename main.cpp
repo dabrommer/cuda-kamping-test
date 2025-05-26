@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <iostream>
+#include <span>
 
 #include "kamping/communicator.hpp"
 #include "kamping/environment.hpp"
@@ -29,7 +30,7 @@ int MPI_test(int argc, char **argv) {
 
         float h_result[N];
         cudaMemcpy(h_result, d_buf, N * sizeof(float), cudaMemcpyDeviceToHost);
-        std::cout << "Rank 1 received: ";
+        std::cout << "MPI rank 1 received: ";
         for (int i = 0; i < N; ++i) std::cout << h_result[i] << " ";
         std::cout << std::endl;
     }
@@ -50,20 +51,20 @@ int kamping_test() {
 
     float* d_buf;
     cudaMalloc((void**)&d_buf, N * sizeof(float));
+    std::span<float> d_span(d_buf, N);
 
     if (rank == 0) {
         float h_data[N];
         for (int i = 0; i < N; ++i) h_data[i] = rank + 1;
         cudaMemcpy(d_buf, h_data, N * sizeof(float), cudaMemcpyHostToDevice);
-
-        comm.send(kamping::send_buf(d_buf), kamping::destination(1));
+        comm.send(kamping::send_buf(d_span), kamping::destination(1));
 
     } else if (rank == 1) {
-        comm.recv(kamping::recv_buf<kamping::no_resize>(d_buf));
+        comm.recv(kamping::recv_buf<kamping::no_resize>(d_span));
 
         float h_result[N];
         cudaMemcpy(h_result, d_buf, N * sizeof(float), cudaMemcpyDeviceToHost);
-        std::cout << "Rank 1 received: ";
+        std::cout << "Kamping rank 1 received: ";
         for (int i = 0; i < N; ++i) std::cout << h_result[i] << " ";
         std::cout << std::endl;
     }
@@ -76,6 +77,5 @@ int main(int argc, char **argv) {
     MPI_test(argc, argv);
 	kamping_test();
 }
-
 
 
