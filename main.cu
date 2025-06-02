@@ -48,12 +48,12 @@ void mpi_test_raw_pointer(int rank) {
     cudaFree(d_buf);
 }
 
-// KaMPIng with gpu pointers in std::span
+// KaMPIng with gpu pointers in cuda::std::span
 void kamping_test_span(int rank) {
     kamping::Communicator comm;
     float* d_buf;
     cudaMalloc((void**)&d_buf, N * sizeof(float));
-    std::span<float> d_span(d_buf, N);
+    cuda::std::span<float> d_span(d_buf, N);
 
     if (rank == 0) {
         float h_data[N];
@@ -146,7 +146,7 @@ void kamping_test_span_to_host(int rank) {
     if (rank == 0) {
         float* d_buf;
         cudaMalloc((void**)&d_buf, N * sizeof(float));
-        std::span<float> d_span(d_buf, N);
+        cuda::std::span<float> d_span(d_buf, N);
         float h_data[N];
         for (int i = 0; i < N; ++i) h_data[i] = X;
         cudaMemcpy(d_buf, h_data, N * sizeof(float), cudaMemcpyHostToDevice);
@@ -156,7 +156,7 @@ void kamping_test_span_to_host(int rank) {
     } else if (rank == 1) {
         float* h_buf = (float*) malloc(N * sizeof(float));
         for (int i = 0; i < N; ++i) h_buf[i] = 99;
-        std::span<float> d_span(h_buf, N);
+        cuda::std::span<float> d_span(h_buf, N);
         comm.recv(kamping::recv_buf<kamping::no_resize>(d_span));
         print_and_test("Kamping gpu span to host", d_span.data());
         free(h_buf);
@@ -170,7 +170,7 @@ void kamping_test_span_to_host_vec(int rank) {
     if (rank == 0) {
         float* d_buf;
         cudaMalloc((void**)&d_buf, N * sizeof(float));
-        std::span<float> d_span(d_buf, N);
+        cuda::std::span<float> d_span(d_buf, N);
         float h_data[N];
         for (int i = 0; i < N; ++i) h_data[i] = X;
         cudaMemcpy(d_buf, h_data, N * sizeof(float), cudaMemcpyHostToDevice);
@@ -184,8 +184,40 @@ void kamping_test_span_to_host_vec(int rank) {
     }    
 }
 
+// MPI with thrust device vector
+void mpi_test_device_vector(int rank) {
+    if (rank == 0) {
+        thrust::device_vector<float> d_vec(N, X);
+        MPI_Send(d_vec.data().get(), N, MPI_FLOAT, 1, 0, MPI_COMM_WORLD);
 
-int main(int argc, char **argv) {
+    } else if (rank == 1) {
+        thrust::device_vector<float> d_vec(N, 99);
+        MPI_Recv(d_vec.data().get(), N, MPI_FLOAT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        float h_result[N];
+        cudaMemcpy(h_result, d_vec.data().get(), N * sizeof(float), cudaMemcpyDeviceToHost);
+        print_and_test("MPI thrust device vector", h_result);
+    }
+}
+
+// KaMPIng with thrust device vector
+void kamping_test_device_vector(int rank) {
+    kamping::Communicator comm;
+
+    if (rank == 0) {
+        thrust::device_vector<float> d_vec(N, X);
+        comm.send(kamping::send_buf(d_vec.data().get()), kamping::destination(1), kamping::send_count(N), kamping::send_type(MPI_FLOAT));
+
+    } else if (rank == 1) {
+        thrust::device_vector<float> d_vec(N, 99);
+        comm.recv(kamping::recv_buf<kamping::no_resize>(d_vec.data().get()), kamping::recv_count(N), kamping::recv_type(MPI_FLOAT));
+        float h_result[N];
+        cudaMemcpy(h_result, d_vec.data().get(), N * sizeof(float), cudaMemcpyDeviceToHost);
+        print_and_test("Kamping thrust device vector", h_result);
+    }
+}
+
+
+int main(int argc, char **argv) { 
     MPI_Init(&argc, &argv);
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -198,6 +230,8 @@ int main(int argc, char **argv) {
     RUN_TEST(mpi_test_raw_pointer_to_host);
     RUN_TEST(kamping_test_span_to_host)
     RUN_TEST(kamping_test_span_to_host_vec)
+    RUN_TEST(mpi_test_device_vector);
+    // RUN_TEST(kamping_test_device_vector);
 
     MPI_Finalize();
     return 0;   
